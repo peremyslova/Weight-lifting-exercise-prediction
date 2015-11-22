@@ -13,6 +13,11 @@ Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible t
 ###Examining the data
 The data analyzed is taken from this [source](http://groupware.les.inf.puc-rio.br/har). This dataset is licensed under the Creative Commons license (CC BY-SA). Let's load the data and see how it looks:
 
+```{r setoptions, echo=FALSE,message=FALSE}
+require(knitr)
+opts_chunk$set(echo = TRUE, cache = TRUE, cache.path = "cache/", fig.path = "figure/")
+```
+
 ```{r loading the data}
 #importing the data from the web
 trainfileURL<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
@@ -45,7 +50,8 @@ test_df_prep1<-test_df_null[,na_ind]
 If we now run summary(train_df_prep1), we'll see that the data now looks much better. 
 Now we're going to check how varible our features are and filter the ones with near zero variance:
 
-```{r cleaning near zero variance predictors}
+```{r cleaning near zero variance predictors, warnings=FALSE}
+library(caret)
 #creating index of all predictors that have near zero variance:
 nzv_ind_df<-nearZeroVar(train_df_prep1, saveMetrics=TRUE)
 #subsetting train and test sets with the same index vector
@@ -60,15 +66,20 @@ train_df_prep3<-train_df_prep2[,-c(1:6)]
 test_df_prep3<-test_df_prep2[,-c(1:6)]
 ```
 
-And we're quickly making sure that there are any NAs left in the data:
+And we're quickly making sure that there are no NAs left in the data:
 
 ```{r checking NAs}
 sum(is.na(train_df_prep3))
 sum(is.na(test_df_prep3))
 ```
 
+After all these procedures we will end up with the following number of columns:
+```{r colnum}
+ncol(train_df_prep3)
+```
+
 ###Data normalization
-Using the same summary() operation again, we could also see that the value scale varies greatly by feature, which can potentially have negative impact on our model training and testing. So we need to normalize the data. We're going to use {x-min(x)/max(x)-min(x)} formulae for data normalization in order to receive the values between 0 and 1:
+Using the same summary() operation again, we could also see that the value scale varies greatly by feature, which can potentially have negative impact on our model training and testing. So we need to normalize the data. We're going to use $$x-min(x)/max(x)-min(x)$$ formulae for data normalization in order to receive the values between 0 and 1:
 
 ```{r data normalization}
 #creating two-row dataframe with min and max values for each variable taken from the dataset
@@ -92,7 +103,7 @@ colnames(train_df)<-colnames(train_df_prep3)
 
 We will repeat the same data normalization procedure for our test set, however, we'll be using min and max values taken from the train set:
 
-```{r data normalization for test, echo=FALSE}
+```{r data normalization for test}
 k<-nrow(test_df_prep3)
 l<-ncol(test_df_prep3)-1
 
@@ -112,8 +123,10 @@ colnames(test_df)<-colnames(test_df_prep3)
 ##Model training
 
 In order to better predict the error we'll receive on the test set after training the model on the training set, we're going to split the training set into two sets:
+
 1. training set (we'll use 60% of our training data for this purpose)
 2. validation set (40% of the training data)
+
 Such data partition will help us to do cross-validation and better predict the out-of-sample error since we'll likely face model overfitting, which would have resulted in more optimistic accuracy prediction than in the reality (i.e. when using the model outisde of the training sample).
 
 ```{r data partition}
@@ -126,7 +139,7 @@ validation_df <- train_df[-inTrain, ]
 
 ### Principal component analysis
 
-Given the large number of potential predictors (*52*), we need to choose the key ones, i.e. the ones that have bigger impact on the outcome. We will use principal component analysis for this purpose:
+Given the large number of potential predictors (*52*), we might want to reduce their numbers by combining them while keeping the information. We will use principal component analysis for this purpose:
 
 ```{r PCA}
 # create preprocess object
@@ -142,24 +155,35 @@ testPC <- predict(preProc,test_df[,-53])
 preProc
 ```
 
+We're now down to 12 predictors that we will use for our prediction model.
+
 ### Cross-validation
 
 After we preformed the PCA, we can now build the actual model and see how well it fits our data. We will use principal components to train *random forest* model on our training set:
 
 ```{r train random forest}
 # run model on outcome and principle components
+set.seed(2416)
 modelFit <- train(train_df$classe ~ .,method="rf",data=trainPC)
 modelFit
 ```
 
 As we can see, we achieved 93% accuracy using 11 predictors.
 
-```{r confusion matrix}
+```{r final model}
 # printing the final model along with its confusion matrix
 modelFit$finalModel
 ```
 
-The final model selection shows 4.42% estimate for out of sample error, which is quite good.
+The final model selection shows ~4% estimate for out of sample error, which is quite good.
+
+If we run our model on the validation set, we then receive even better results:
+
+```{r confusion matrix}
+valid_predict<-predict(modelFit,validPC)
+pca_conf_matrix<-confusionMatrix(validation_df$classe,valid_predict)
+pca_conf_matrix
+```
 
 Illustrating the dependancy between the number of randomly selected predictors and accuracy:
 
@@ -168,7 +192,7 @@ Illustrating the dependancy between the number of randomly selected predictors a
 plot(modelFit)
 ```
 
-One of the PCA downsides is the lack of interpretability, so we aren't going to visualize the result decision tree. Next time we're going to try using another model to see how it compares with PCA+RF approach.
+One of the PCA downsides is the lack of interpretability, so we aren't going to visualize the result decision tree. Next time we're going to try using another model to see how does it compare with PCA+RF approach.
 
 ##Running prebuilt test cases
 
