@@ -1,0 +1,192 @@
+---
+title: "Weight lifting exercise analysis"
+author: "Marina Peremyslova"
+date: "November 17, 2015"
+output: html_document
+---
+
+##Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset). 
+
+##Data preparation
+
+###Examining the data
+The data analyzed is taken from this [source](http://groupware.les.inf.puc-rio.br/har). This dataset is licensed under the Creative Commons license (CC BY-SA). Let's load the data and see how it looks:
+
+```{r loading the data}
+#importing the data from the web
+trainfileURL<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testfileURL<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+download.file(trainfileURL,destfile="train.csv",method="curl")
+train_df_null<-read.csv("train.csv")
+
+download.file(testfileURL,destfile="test.csv",method="curl")
+test_df_null<-read.csv("test.csv")
+
+#checking the features
+names(train_df_null)
+```
+
+The goal of this project is to predict the manner in which exercises were done. This is the "classe" variable in the training set. Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E).
+
+Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes.
+
+###Cleaning the data
+If we look at the actual data by using summary(train_df_null) operation, we'll see that some of the features have lots of missing values, so we will need to choose missing values imputation strategy in order to proceed forward. We can also notice a certain pattern in missing data: there are exactly *19216* missing values for the features with missing data. Given that we have 19622 samples in the train set, 19216 makes almost 98% percent of all samples, so we're going to filter out all variables that have more than 80% of missing values. We will then take out the same variables from the test dataset.
+
+```{r missing data cleaning}
+#creating index of all columns that don't have NAs more than 80%
+na_ind<-apply(!is.na(train_df_null),2,sum)>0.8*nrow(train_df_null)
+#subsetting train and test sets with the same index vector
+train_df_prep1<-train_df_null[,na_ind]
+test_df_prep1<-test_df_null[,na_ind]
+```
+If we now run summary(train_df_prep1), we'll see that the data now looks much better. 
+Now we're going to check how varible our features are and filter the ones with near zero variance:
+
+```{r cleaning near zero variance predictors}
+#creating index of all predictors that have near zero variance:
+nzv_ind_df<-nearZeroVar(train_df_prep1, saveMetrics=TRUE)
+#subsetting train and test sets with the same index vector
+train_df_prep2<-train_df_prep1[,nzv_ind_df$nzv==FALSE]
+test_df_prep2<-test_df_prep1[,nzv_ind_df$nzv==FALSE]
+```
+
+We will also clean variables such as X, user_name, raw_timestamp_part1,raw_timestamp_part2,cvtd_timestamp and num_window as we consider them irrelevant to the outcome:
+
+```{r dropping the first 6 variables}
+train_df_prep3<-train_df_prep2[,-c(1:6)]
+test_df_prep3<-test_df_prep2[,-c(1:6)]
+```
+
+And we're quickly making sure that there are any NAs left in the data:
+
+```{r checking NAs}
+sum(is.na(train_df_prep3))
+sum(is.na(test_df_prep3))
+```
+
+###Data normalization
+Using the same summary() operation again, we could also see that the value scale varies greatly by feature, which can potentially have negative impact on our model training and testing. So we need to normalize the data. We're going to use {x-min(x)/max(x)-min(x)} formulae for data normalization in order to receive the values between 0 and 1:
+
+```{r data normalization}
+#creating two-row dataframe with min and max values for each variable taken from the dataset
+min_row_train<-unlist((lapply(train_df_prep3[,-53], FUN=min)))
+max_row_train<-unlist((lapply(train_df_prep3[,-53], FUN=max)))
+
+
+k<-nrow(train_df_prep3)
+l<-ncol(train_df_prep3)-1
+train_df_matrix<-matrix(0,nrow=k,ncol=l) 
+for(i in 1:k){ 
+   for(j in 1:l){ 
+train_df_matrix[i,j]<-(train_df_prep3[i,j]-min_row_train[j])/(max_row_train[j]-min_row_train[j])
+} 
+} 
+#converting the matrix into the data.frame
+train_df<-cbind(as.data.frame(train_df_matrix),train_df_prep3$classe)
+colnames(train_df)<-colnames(train_df_prep3)
+```
+
+
+We will repeat the same data normalization procedure for our test set, however, we'll be using min and max values taken from the train set:
+
+```{r data normalization for test, echo=FALSE}
+k<-nrow(test_df_prep3)
+l<-ncol(test_df_prep3)-1
+
+#creating two-row dataframe with min and max values for each variable taken from the dataset
+test_df_matrix<-matrix(0,nrow=k,ncol=l) 
+for(i in 1:k){ 
+   for(j in 1:l){ 
+test_df_matrix[i,j]<-(test_df_prep3[i,j]-min_row_train[j])/(max_row_train[j]-min_row_train[j])
+} 
+} 
+#converting the matrix into the data.frame
+#note that the last column of the data set is called problem_id, which we will use for testing in order to compare our predictions on the test dataset with the target ones
+test_df<-cbind(as.data.frame(test_df_matrix),test_df_prep3$problem_id)
+colnames(test_df)<-colnames(test_df_prep3)
+```
+
+##Model training
+
+In order to better predict the error we'll receive on the test set after training the model on the training set, we're going to split the training set into two sets:
+1. training set (we'll use 60% of our training data for this purpose)
+2. validation set (40% of the training data)
+Such data partition will help us to do cross-validation and better predict the out-of-sample error since we'll likely face model overfitting, which would have resulted in more optimistic accuracy prediction than in the reality (i.e. when using the model outisde of the training sample).
+
+```{r data partition}
+inTrain <- createDataPartition(train_df$classe, p=0.60, list=FALSE)
+train_df <- train_df[inTrain, ]
+#creating validation dataset of what's not in the training set
+validation_df <- train_df[-inTrain, ]
+```
+
+
+### Principal component analysis
+
+Given the large number of potential predictors (*52*), we need to choose the key ones, i.e. the ones that have bigger impact on the outcome. We will use principal component analysis for this purpose:
+
+```{r PCA}
+# create preprocess object
+preProc <- preProcess(test_df[,-53], method="pca")
+# calculate PCs for training data
+trainPC <- predict(preProc,train_df[,-53])
+# calculate PCs for validation data
+validPC <- predict(preProc,validation_df[,-53])
+# calculate PCs for test data
+testPC <- predict(preProc,test_df[,-53])
+
+#PCA results
+preProc
+```
+
+### Cross-validation
+
+After we preformed the PCA, we can now build the actual model and see how well it fits our data. We will use principal components to train *random forest* model on our training set:
+
+```{r train random forest}
+# run model on outcome and principle components
+modelFit <- train(train_df$classe ~ .,method="rf",data=trainPC)
+modelFit
+```
+
+As we can see, we achieved 93% accuracy using 11 predictors.
+
+```{r confusion matrix}
+# printing the final model along with its confusion matrix
+modelFit$finalModel
+```
+
+The final model selection shows 4.42% estimate for out of sample error, which is quite good.
+
+Illustrating the dependancy between the number of randomly selected predictors and accuracy:
+
+```{r plotting the modelFit}
+#drawing the plot
+plot(modelFit)
+```
+
+One of the PCA downsides is the lack of interpretability, so we aren't going to visualize the result decision tree. Next time we're going to try using another model to see how it compares with PCA+RF approach.
+
+##Running prebuilt test cases
+
+Finally, we will preform the testing of our model on the test set. The trick with this test set was that we didn't know the correct values so we could compare the outcomes only after the test results submission. Test results were prepared in a form .txt files with predicted classe letter in each. We preformerd the total of 20 test cases.
+
+```{r 20 test cases}
+answers<-predict(modelFit,testPC)
+
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+    }
+}
+pml_write_files(answers)
+#outputting the predict results for the illustration purposes:
+predict(modelFit,testPC)
+
+```
+
